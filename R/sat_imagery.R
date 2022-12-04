@@ -5,7 +5,7 @@
 library(raster) # Raster Data handling
 library(terra)
 library(tidyverse) # Data Manipulation
-library(getlandsat) # keyless Landsat data (2013-2017)
+# library(getlandsat) # keyless Landsat data (2013-2017)
 library(sf) # Vector data processing
 library(mapview) # Rapid Interactive visualization
 library(rstac)
@@ -24,8 +24,7 @@ bellville_pt <- data.frame(
     )
 
 # view Bellville point
-bellville_pt %>%
-  mapview::mapview()
+# bellville_pt %>% mapview::mapview()
 
 # Create a bounding box of area around point
 bb <-
@@ -34,8 +33,8 @@ bb <-
   sf::st_bbox()
 
 # view bounding box area
-bb  %>%
-  mapview::mapview()
+# bb  %>%
+#   mapview::mapview()
 stac_path <- 'https://landsatlook.usgs.gov/stac-server' # Landsat STAC API Endpoint
 
 # Call the STAC API endpoint
@@ -43,8 +42,6 @@ stac_json <-
   stac_path %>%
   httr::GET() %>%
   httr::content()
-
-i <- 4
 
 # extract landsat collection list
 landsat_collects <- sapply(1:length(stac_json), function(i) {
@@ -62,6 +59,7 @@ collects_res <-
   landsat_collects %>%
   httr::GET() %>%
   httr::content()
+
 length(collects_res$collections)
 
 # extract landsat collection list
@@ -76,19 +74,48 @@ stac_search <- sapply(1:length(stac_json), function(i) {
   unlist()
 
 httr::POST()
-"{'limit': 400, 'bbox': [-97.56546020507812, 45.20332826663052, -97.2241973876953, 45.52751668442124]}"
+library(sf)
+sf::st_bbox()
 
+# Post inputs
+limit_return = "400"
+xmin         = "-97.56546020507812"
+ymin         = "45.20332826663052"
+xmax         = "-97.2241973876953"
+ymax         = "45.52751668442124"
+date_time  <-  "2018-11-01T00:00:00Z/2018-12-05T23:59:59Z"
+
+# Concantenate bounding box and limit_return into POST body JSON
+post_val <- paste0('{"limit":', limit_return, '"bbox": [', xmin, ', ' , ymin, ', ', xmax, ', ', ymax, '] ', '"datetime":', date_time, '}')
+# use the specified datetime format to create string variable of desired time range
+
+# POST values
 params <-
-  '{"limit":400, "bbox": [-97.56546020507812, 45.20332826663052, -97.2241973876953, 45.52751668442124]}' %>%
+  post_val %>%
   jsonlite::toJSON()
+
+# make POST query w/ bounding box
 stac_query <-
   stac_search %>%
-  httr::POST(body = params)
-stac_con <-
-  stac_query %>%
+  httr::POST(body = params) %>%
   httr::content()
-stac_final <- rawToChar(stac_con) %>% jsonlite::fromJSON()
+
+# convert raw to character and to JSON
+stac_final <-
+  stac_query %>%
+  rawToChar() %>%
+  jsonlite::fromJSON()
 stac_final$features
+stac_final$links
+stac_final$features$assets$coastal$alternate$s3
+stac_links <-
+  stac_final$features$links %>%
+  dplyr::bind_rows() %>%
+  dplyr::filter(rel == "self")
+
+stac_links$href[1]
+"https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l1/items/LC09_L1GT_008001_20221201_20221201_02_T2.tif"
+stac_links[[1]]
 # %>%
   # jsonlite::fromJSON()
 stac_query$request
