@@ -13,6 +13,8 @@ library(httr)
 library(jsonlite)
 
 library(bigrquery)
+
+source("R/utils.R")
 # path 26
 # row 39
 
@@ -32,13 +34,6 @@ path    <- "26"
 row     <- "39"
 start_date      <- "2018-10-01"
 end_date        <- "2018-12-31"
-
-# link to scene
-# scene_id        <- paste0(sensor_id, "_L1GT_", landsat_path, landsat_row, "_", gsub("-", "", start_date), "_", gsub("-", "", end_date)  ,"_01_T2")
-# scene_path      <- paste0("gs://gcp-public-data-landsat/",  sensor_id, "/", collection_id, "/", landsat_path, "/", landsat_row, "/", scene_id, "/")
-
-# BigQuery Project ID
-# bq_proj_id <- "bigquery-public-data.cloud_storage_geo_index.landsat_index"
 
 # rm(landsat_index, url_df, sub_index, sql, end_date, start_date, bq_project, table_id, row, path)
 landsat_index <-
@@ -162,7 +157,7 @@ swi_stk <- lapply(1:length(landsat_mask), function(i){
 # ****************************
 # ---- Sentinal 2 imagery ----
 # ****************************
-
+# ρVRE1−ρSWIR2ρVRE1+ρSWIR2
 # bellville site bounding box
 bbox <- data.frame(
     lat = 30.007827243000914,
@@ -172,32 +167,102 @@ bbox <- data.frame(
     coords = c("lng", "lat"),
     crs    = 4326
   ) %>%
-  sf::st_buffer(3000) %>%
+  sf::st_buffer(2000) %>%
   sf::st_bbox()
 
-bigrquery::bq_auth()
-bigrquery::bq_projects()
+class(bbox)
+
+typeof(bbox)
+isb
+# bigrquery::bq_auth()
+# bigrquery::bq_projects()
+
+# bq_project = "landsat-index-table"
+# table_id   = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
+# start_date = "2018-10-01"
+# end_date   = "2019-01-15"
+#
+# sentinal_idx <- get_sentinal_index(
+#   bq_project = "landsat-index-table",
+#   table_id   = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index",
+#   bbox       = bbox,
+#   start_date = "2018-09-01",
+#   end_date   = "2019-02-01"
+# )
 
 bq_project = "landsat-index-table"
 table_id   = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
+bbox       = bbox
+bands      = c(3, 8)
+start_date = "2015-09-01"
+end_date   = "2022-11-01"
 
-start_date = "2018-10-01"
-end_date   = "2019-01-15"
-
-sentinal_idx <- get_sentinal_index(
+sentinal_idx <- get_sentinal(
   bq_project = "landsat-index-table",
   table_id   = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index",
   bbox       = bbox,
-  start_date = "2018-10-01",
-  end_date   = "2019-01-15"
+  bands      = c(3, 8),
+  start_date = "2015-09-01",
+  end_date   = "2022-11-01"
 )
 
+
+sentinal_idx$uscene_id <- sapply(strsplit(sentinal_idx$product_id, "_"), function(x) x[3])
+sentinal_idx$utag_id   <- sapply(strsplit(sentinal_idx$product_id, "_"), function(x) x[6])
+
+url_df <-
+  lapply(1:nrow(sentinal_idx), function(y) {
+    data.frame(
+      url = gsub(
+        "gs://",
+        "https://storage.googleapis.com/",
+        paste0(sentinal_idx$base_url[y],
+               "/GRANULE/", sentinal_idx$granule_id[y],
+               "/IMG_DATA/",sentinal_idx$utag_id[y], "_" ,sentinal_idx$uscene_id[y],  "_B",
+               ifelse(bands < 10, paste0("0", bands), bands),  ".jp2")
+      )
+    ) %>%
+      dplyr::mutate(
+        band        = ifelse(bands < 10, paste0("0", bands), bands),
+        date        = sentinal_idx$sensing_time[y],
+        product_id  = sentinal_idx$product_id[y],
+        cloud_cover = sentinal_idx$cloud_cover[y]
+      ) %>%
+      dplyr::relocate(product_id, date, cloud_cover, band, url)
+
+  }) %>%
+  dplyr::bind_rows()
+# extract and build URL dataframe
+url_df <-
+  lapply(1:nrow(sentinal_idx), function(y) {
+    data.frame(
+      url = gsub(
+        "gs://",
+        "https://storage.googleapis.com/",
+        paste0(sentinal_idx$base_url[y], "/", paste0(sentinal_idx$product_id[y], "_B", bands, ".TIF")),
+      )) %>%
+      dplyr::mutate(
+        band        = paste0("B", bands),
+        date        = sentinal_idx$sensing_time[y],
+        product_id  = sentinal_idx$product_id[y],
+        cloud_cover = sentinal_idx$cloud_cover[y]
+      ) %>%
+      dplyr::relocate(product_id, date, cloud_cover, band, url)
+  }) %>%
+  dplyr::bind_rows() %>%
+  dplyr::tibble() %>%
+  dplyr::group_by(product_id) %>%
+  dplyr::group_split()
+
+url_df
 
 sentinal_idx$uscene_id <- sapply(strsplit(sentinal_idx$product_id, "_"), function(x) x[3])
 sentinal_idx$utag_id <- sapply(strsplit(sentinal_idx$product_id, "_"), function(x) x[6])
 # extract and build URL dataframe
 y = 1
 "https://storage.googleapis.com/gcp-public-data-sentinel-2/tiles/33/U/UP/S2A_MSIL1C_20150704T101006_N0204_R022_T33UUP_20150704T101337.SAFE/GRANULE/L1C_T33UUP_A000162_20150704T101337/IMG_DATA/T33UUP_20150704T101006_B01.jp2"
+"https://storage.googleapis.com/gcp-public-data-sentinel-2/tiles/33/U/UP/S2A_MSIL1C_20150704T101006_N0204_R022_T33UUP_20150704T101337.SAFE/GRANULE/L1C_T33UUP_A000162_20150704T101337/IMG_DATA/T33UUP_20150704T101006_B01.jp2"
+"https://storage.googleapis.com/gcp-public-data-sentinel-2/tiles/14/R/QU/S2B_MSIL1C_20181223T170719_N0207_R069_T14RQU_20181223T203244.SAFE/S2B_MSIL1C_20181223T170719_N0207_R069_T14RQU_20181223T203244_B5.TIF"
 sentinal_idx$product_id
 
 url_df <-
