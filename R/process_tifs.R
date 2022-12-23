@@ -20,9 +20,7 @@ path_df <-
     basename =  gsub('out_', "", gsub("\\..*","",file_name))
   ) %>%
   tidyr::separate(col = basename, into = c("date", "id_num"))
-"/^[a-zA-Z0-9_]+$/"
-"ndsf_2023-10-03_fgdsgf_--"
-gsub('[^a-zA-Z0-9/_]+', "", "ndsf_2023-10-03_fgdsgf_--")
+
 # ************************
 # ---- Calculate NDWI ----
 # ************************
