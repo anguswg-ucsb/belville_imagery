@@ -157,7 +157,7 @@ swi_stk <- lapply(1:length(landsat_mask), function(i){
 # ****************************
 # ---- Sentinal 2 imagery ----
 # ****************************
-# ρVRE1−ρSWIR2ρVRE1+ρSWIR2
+
 # bellville site bounding box
 bbox <- data.frame(
     lat = 30.007827243000914,
@@ -170,189 +170,70 @@ bbox <- data.frame(
   sf::st_buffer(2000) %>%
   sf::st_bbox()
 
-class(bbox)
-
-typeof(bbox)
-isb
-# bigrquery::bq_auth()
-# bigrquery::bq_projects()
-
-# bq_project = "landsat-index-table"
-# table_id   = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
-# start_date = "2018-10-01"
-# end_date   = "2019-01-15"
-#
-# sentinal_idx <- get_sentinal_index(
-#   bq_project = "landsat-index-table",
-#   table_id   = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index",
-#   bbox       = bbox,
-#   start_date = "2018-09-01",
-#   end_date   = "2019-02-01"
-# )
-
-bq_project = "landsat-index-table"
-table_id   = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
-bbox       = bbox
-bands      = c(3, 8)
-start_date = "2015-09-01"
-end_date   = "2022-11-01"
-
-sentinal_idx <- get_sentinal(
+# Query BigQuery index table containing sentinal 2 scenes
+sentinal_idx <- get_sentinal_index(
   bq_project = "landsat-index-table",
   table_id   = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index",
   bbox       = bbox,
-  bands      = c(3, 8),
   start_date = "2015-09-01",
-  end_date   = "2022-11-01"
+  end_date   = "2022-12-01"
 )
 
+# remove S2A granule
+subset_idx <-
+  sentinal_idx %>%
+  dplyr::filter(!grepl("S2A_OPER", granule_id))
 
-sentinal_idx$uscene_id <- sapply(strsplit(sentinal_idx$product_id, "_"), function(x) x[3])
-sentinal_idx$utag_id   <- sapply(strsplit(sentinal_idx$product_id, "_"), function(x) x[6])
+# downloads Sentinal 2 bands 3 and 8 and crop/mask to AOI
+sentinal_stk <- get_sentinal(
+  index_tbl      = subset_idx,
+  bands          = c(3, 8),
+  mask_shp       = bbox
+)
 
-url_df <-
-  lapply(1:nrow(sentinal_idx), function(y) {
-    data.frame(
-      url = gsub(
-        "gs://",
-        "https://storage.googleapis.com/",
-        paste0(sentinal_idx$base_url[y],
-               "/GRANULE/", sentinal_idx$granule_id[y],
-               "/IMG_DATA/",sentinal_idx$utag_id[y], "_" ,sentinal_idx$uscene_id[y],  "_B",
-               ifelse(bands < 10, paste0("0", bands), bands),  ".jp2")
-      )
-    ) %>%
-      dplyr::mutate(
-        band        = ifelse(bands < 10, paste0("0", bands), bands),
-        date        = sentinal_idx$sensing_time[y],
-        product_id  = sentinal_idx$product_id[y],
-        cloud_cover = sentinal_idx$cloud_cover[y]
-      ) %>%
-      dplyr::relocate(product_id, date, cloud_cover, band, url)
+# directory to save TIFs
+save_dir <- "D:/belville_tx/output"
 
-  }) %>%
-  dplyr::bind_rows()
-# extract and build URL dataframe
-url_df <-
-  lapply(1:nrow(sentinal_idx), function(y) {
-    data.frame(
-      url = gsub(
-        "gs://",
-        "https://storage.googleapis.com/",
-        paste0(sentinal_idx$base_url[y], "/", paste0(sentinal_idx$product_id[y], "_B", bands, ".TIF")),
-      )) %>%
-      dplyr::mutate(
-        band        = paste0("B", bands),
-        date        = sentinal_idx$sensing_time[y],
-        product_id  = sentinal_idx$product_id[y],
-        cloud_cover = sentinal_idx$cloud_cover[y]
-      ) %>%
-      dplyr::relocate(product_id, date, cloud_cover, band, url)
-  }) %>%
-  dplyr::bind_rows() %>%
-  dplyr::tibble() %>%
-  dplyr::group_by(product_id) %>%
-  dplyr::group_split()
-
-url_df
-
-sentinal_idx$uscene_id <- sapply(strsplit(sentinal_idx$product_id, "_"), function(x) x[3])
-sentinal_idx$utag_id <- sapply(strsplit(sentinal_idx$product_id, "_"), function(x) x[6])
-# extract and build URL dataframe
-y = 1
-"https://storage.googleapis.com/gcp-public-data-sentinel-2/tiles/33/U/UP/S2A_MSIL1C_20150704T101006_N0204_R022_T33UUP_20150704T101337.SAFE/GRANULE/L1C_T33UUP_A000162_20150704T101337/IMG_DATA/T33UUP_20150704T101006_B01.jp2"
-"https://storage.googleapis.com/gcp-public-data-sentinel-2/tiles/33/U/UP/S2A_MSIL1C_20150704T101006_N0204_R022_T33UUP_20150704T101337.SAFE/GRANULE/L1C_T33UUP_A000162_20150704T101337/IMG_DATA/T33UUP_20150704T101006_B01.jp2"
-"https://storage.googleapis.com/gcp-public-data-sentinel-2/tiles/14/R/QU/S2B_MSIL1C_20181223T170719_N0207_R069_T14RQU_20181223T203244.SAFE/S2B_MSIL1C_20181223T170719_N0207_R069_T14RQU_20181223T203244_B5.TIF"
-sentinal_idx$product_id
-
-url_df <-
-  lapply(1:nrow(sentinal_idx), function(y) {
-    data.frame(
-      url = gsub(
-        "gs://",
-        "https://storage.googleapis.com/",
-        paste0(sentinal_idx$base_url[y],
-               "/GRANULE/", sentinal_idx$granule_id[y],
-               "/IMG_DATA/",sentinal_idx$utag_id[y], "_" ,sentinal_idx$uscene_id[y],  "_B0", 1:7,  ".jp2")
-        )
-      ) %>%
-      dplyr::mutate(
-        band        = paste0("B0", 1:7),
-        date        = sentinal_idx$sensing_time[y],
-        product_id  = sentinal_idx$product_id[y],
-        cloud_cover = sentinal_idx$cloud_cover[y]
-      ) %>%
-      dplyr::relocate(product_id, date, cloud_cover, band, url)
-
-  }) %>%
-  dplyr::bind_rows()
-
-write.csv(url_df, "sentinal_2_scene_index.csv")
-in.files <- list.files(getwd(),"jp2$")
-out.files <- gsub(".jp2", ".tif", in.files)
-library(raster)
-
-tmp <- url_df %>%
-  dplyr::filter(product_id == "S2B_MSIL1C_20181113T170539_N0207_R069_T14RQU_20181113T202933")
-
-r_lst2 <- lapply(1:nrow(tmp), function(i) {
-
-  message(paste0(i))
-
-  rstk <- raster::raster(tmp$url[i])
-  rstk
-})
-plot(r_lst[[2]])
-
-r_lst2
-r_lst2[[2]]
-# bellville site location
-bellville_mask <- data.frame(
-  lat = 30.007827243000914,
-  lng = -96.31442973176237
-) %>%
-  sf::st_as_sf(
-    coords = c("lng", "lat"),
-    crs    = 4326
-  ) %>%
-  sf::st_buffer(1000) %>%
-  sf::st_bbox() %>%
-  sf::st_as_sfc() %>%
-  sf::st_as_sf() %>%
-  sf::st_transform("+proj=utm +zone=14 +datum=WGS84 +units=m +no_defs") %>%
-  terra::vect()
+# save individual TIFs
+save_sds(
+  sds            = sentinal_stk,
+  save_directory = save_dir,
+  filenames      = names(sentinal_stk)
+  )
 
 
-mask_lst <- lapply(1:length(r_lst), function(i) {
-  message(paste0(i))
 
-  masked_r <-
-    r_lst[[i]] %>%
-    terra::rast() %>%
-    terra::crop(bellville_mask) %>%
-    terra::mask(bellville_mask)
-
-  masked_r
-
-})
-
-mask_lst2 <- lapply(1:length(r_lst2), function(i) {
-  message(paste0(i))
-
-  masked_r <-
-    r_lst2[[i]] %>%
-    terra::rast() %>%
-    terra::crop(bellville_mask) %>%
-    terra::mask(bellville_mask)
-
-  masked_r
-
-})
-mask_lst[[5]] %>%
-  plot()
-mask_lst2[[5]] %>%
-  plot()
-r_lst
+# names(sentinal_stk)
+# paste0("/sentinal2_", gsub("-", "", names(sentinal_stk)[i]), "_", i, ".tif")
+#
+# gsub('[^[:alnum:] ]', '', )
+# save_sds <- function(sds, save_directory) {
+#
+#   # loop over stack and save TIFs individually
+#   for (i in 1:length(sds)) {
+#
+#       # directory store
+#       save_path <- paste0(save_directory, "/output")
+#
+#       if(!dir.exists(save_path)) {
+#
+#         message(paste0("Creating output directory"))
+#
+#         dir.create(save_path)
+#
+#       }
+#
+#       message(paste0("Saving tif - ", i, "/", length(sds)))
+#
+#       # save raster
+#       terra::writeRaster(
+#         sds[[i]],
+#         paste0(save_path, "/sentinal2_", gsub("-", "", names(sds)[i]), "_", i, ".tif")
+#       )
+#
+#       }
+#
+# }
 
 # ******************************
 # ---- Landsat STAC catolog ----
