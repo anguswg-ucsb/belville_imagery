@@ -58,8 +58,7 @@ ndwi_lst <- lapply(1:nrow(path_df), function(i) {
 }) %>%
   stats::setNames(stk_names) %>%
   terra::sds()
-ndwi_lst$ndwi_20151005 %>%
-ndwi_lst$ndwi_20151005_1
+
 # Save out NDWI files
 save_sds(
     sds            = ndwi_lst,
@@ -67,18 +66,6 @@ save_sds(
     filenames      = names(ndwi_lst)
 )
 
-rm(tmp)
-s <- rast(system.file("ex/logo.tif", package="terra"))
-plot(s)
-s
-
-tmp <-
-  ndwi_lst[[1:25]] %>%
-  terra::rast()
-
-terra::nlayer(s)
-terra::nlyr(s)
-animate(tmp, n=1)
 # ***************************
 # ---- Extract/Load data ----
 # ***************************
