@@ -201,40 +201,6 @@ save_sds(
   filenames      = names(sentinal_stk)
   )
 
-
-
-# names(sentinal_stk)
-# paste0("/sentinal2_", gsub("-", "", names(sentinal_stk)[i]), "_", i, ".tif")
-#
-# gsub('[^[:alnum:] ]', '', )
-# save_sds <- function(sds, save_directory) {
-#
-#   # loop over stack and save TIFs individually
-#   for (i in 1:length(sds)) {
-#
-#       # directory store
-#       save_path <- paste0(save_directory, "/output")
-#
-#       if(!dir.exists(save_path)) {
-#
-#         message(paste0("Creating output directory"))
-#
-#         dir.create(save_path)
-#
-#       }
-#
-#       message(paste0("Saving tif - ", i, "/", length(sds)))
-#
-#       # save raster
-#       terra::writeRaster(
-#         sds[[i]],
-#         paste0(save_path, "/sentinal2_", gsub("-", "", names(sds)[i]), "_", i, ".tif")
-#       )
-#
-#       }
-#
-# }
-
 # ******************************
 # ---- Landsat STAC catolog ----
 # ******************************
