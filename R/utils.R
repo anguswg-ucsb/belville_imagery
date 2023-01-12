@@ -70,11 +70,330 @@ get_landsat_index <- function(
         dplyr::relocate(product_id, date, cloud_cover, band, url)
     }) %>%
     dplyr::bind_rows() %>%
-    dplyr::tibble()
+    dplyr::tibble() %>%
+    dplyr::arrange(date)
 
   return(url_df)
 
 }
+ndwi_index <- function() {
+
+  band_df <- data.frame(
+    satellite  = c("l5", "l7", "l8", "s2"),
+    sat_num    = c(5, 7, 8, 2),
+    green      = c("B2", "B2", "B3", "B3"),
+    nir        = c("B5", "B5", "B5", "B8"),
+    green_num  = c(2, 2, 3, 3),
+    nir_num    = c(5, 5, 5, 8)
+  )
+
+  return(band_df)
+
+}
+
+get_landsat_ndwi <- function(
+    index_tbl      = NULL,
+    mask_shp       = NULL
+
+) {
+  # check if mask shape is a SF Object
+  if(any(grepl("sf", class(mask_shp)))) {
+
+    # check if mask shape is a SF Polygon or Multipolygon
+    if(sf::st_is(mask_shp, "POLYGON") | sf::st_is(mask_shp, "MULTIPOLYGON") == TRUE) {
+
+      mask_shp <-
+        mask_shp %>%
+        terra::vect()
+
+      message(paste0("Converting SF Polygon/Multipolygon to Terra SpatVector"))
+
+    } else {
+
+      stop(paste0("Please provide an SF Polygon/Multipolygon or a Terra SpatVector"))
+
+    }
+
+  }
+
+  # check if mask shape is a bbox Object
+  if(class(mask_shp) == 'bbox') {
+
+    # make mask shape to mask rasters to AOI Bounding box
+    mask_shp <-
+      mask_shp %>%
+      sf::st_as_sfc() %>%
+      sf::st_sf() %>%
+      terra::vect()
+  }
+
+  # NDWI index dataframe for different landsat launch bands
+  ndwi_df <- ndwi_index()
+
+  # unique product IDs
+  uproduct_ids <- unique(index_tbl$product_id)
+
+  #  extract and build URL dataframe, select NDWI bands
+  url_df <-
+    lapply(1:length(uproduct_ids), function(y) {
+
+      # subset index
+      sub_idx <- index_tbl[index_tbl$product_id == uproduct_ids[y],]
+
+      # iteration satellite
+      sat       <- sub("\\D*(\\d+).*", "\\1",   sub_idx$product_id[1])
+
+      # relevant bands
+      rel_bands <- ndwi_df[ndwi_df$sat_num == as.numeric(sat), ]
+
+      # list of bands
+      bands <- paste0("B", c(rel_bands$green_num[1],  rel_bands$nir_num[1]))
+
+      # subset index to bands of interest
+      sub_idx <- sub_idx[sub_idx$band %in% bands, ]
+      sub_idx$satellite <- sat
+      sub_idx
+
+      # data.frame( url  = gsub( "gs://","https://storage.googleapis.com/", paste0(
+      #       index_tbl$url[y], "/", paste0(index_tbl$product_id[y], "_B",
+      #       ifelse(bands < 10, paste0("0", bands), bands),".TIF")) ),
+      #   date = index_tbl$date[y],satellite = sat,  product_id = index_tbl$product_id[y], band= paste0("B",
+      #   ifelse(bands < 10, paste0("0", bands), bands)), cloud_cover   = index_tbl$cloud_cover[y])
+    }) %>%
+    dplyr::bind_rows() %>%
+    dplyr::tibble() %>%
+    dplyr::group_by(satellite) %>%
+    dplyr::arrange(date, .by_group = T) %>%
+    dplyr::ungroup() %>%
+    split(factor(.$product_id, levels = unique(.$product_id)))
+
+  message(paste0("Downloading Landsat data..."))
+
+  # dates to assign as names to list
+  stk_dates <- lapply(1:length(url_df), function(z) {
+    gsub(
+      "-",
+      "_",
+      paste0(
+        as.character(unique(url_df[[z]]$satellite)), "_", as.character(as.Date(unique(url_df[[z]]$date))),
+        "_", as.character(unique(url_df[[z]]$product_id))
+      )
+    )
+  }) %>%
+    unlist()
+
+  # loop over list of URLs pointing to Sentinal data in GCP
+  ls_stk <- lapply(1:length(url_df), function(y) {
+
+    prod_id <- unique(url_df[[y]]$product_id)
+
+    # download rasters
+    r_lst <-
+      lapply(1:nrow(url_df[[y]]), function(i) {
+
+        message(paste0(
+          "Product: ", url_df[[y]]$product_id[i], " (Band ", url_df[[y]]$band[i], ") - ",
+          y, "/", (length(url_df))))
+
+        tryCatch(
+          terra::rast(url_df[[y]]$url[i]),
+
+          error = function(e) NULL
+          # message(paste0("ERROR\nCould not find product: ", url_df[[y]]$product_id[i], "(", url_df[[y]]$band[i], ")" ))
+        )
+      })
+
+    # if NULL elemnts in list, return NULL
+    if(!is.null(unlist(r_lst))) {
+
+      message("---> Cropping and masking to AOI")
+
+      r_lst <-
+        r_lst %>%
+        terra::rast() %>%
+        terra::crop(terra::project(mask_shp, terra::crs(r_lst[[1]]))) %>%
+        terra::mask(terra::project(mask_shp, terra::crs(r_lst[[1]])))
+
+      r_lst
+
+    } else {
+
+      r_lst <- NULL
+
+      r_lst
+
+    }
+
+  })
+
+  # remove missing dates from name list
+  stk_dates <- stk_dates[!sapply(ls_stk,is.null)]
+
+  # remove NULL list elements
+  ls_stk <- ls_stk[!sapply(ls_stk,is.null)]
+
+  # Set names and make a terra sds
+  ls_stk <-
+    ls_stk %>%
+    stats::setNames(stk_dates) %>%
+    terra::sds()
+
+
+  return(ls_stk)
+
+}
+
+# get_landsat_ndwi2 <- function(
+#     index_tbl      = NULL,
+#     mask_shp       = NULL
+#
+# ) {
+#   # check if mask shape is a SF Object
+#   if(any(grepl("sf", class(mask_shp)))) {
+#
+#     # check if mask shape is a SF Polygon or Multipolygon
+#     if(sf::st_is(mask_shp, "POLYGON") | sf::st_is(mask_shp, "MULTIPOLYGON") == TRUE) {
+#
+#       mask_shp <-
+#         mask_shp %>%
+#         terra::vect()
+#
+#       message(paste0("Converting SF Polygon/Multipolygon to Terra SpatVector"))
+#
+#     } else {
+#
+#       stop(paste0("Please provide an SF Polygon/Multipolygon or a Terra SpatVector"))
+#
+#     }
+#
+#   }
+#
+#   # check if mask shape is a bbox Object
+#   if(class(mask_shp) == 'bbox') {
+#
+#     # make mask shape to mask rasters to AOI Bounding box
+#     mask_shp <-
+#       mask_shp %>%
+#       sf::st_as_sfc() %>%
+#       sf::st_sf() %>%
+#       terra::vect()
+#   }
+#
+#   # NDWI index dataframe for different landsat launch bands
+#   ndwi_df <- ndwi_index()
+#
+#   # unique product IDs
+#   uproduct_ids <- unique(index_tbl$product_id)
+#
+#   #  extract and build URL dataframe, select NDWI bands
+#   url_df <-
+#     lapply(1:length(uproduct_ids), function(y) {
+#
+#           # subset index
+#           sub_idx <- index_tbl[index_tbl$product_id == uproduct_ids[y],]
+#
+#           # iteration satellite
+#           sat       <- sub("\\D*(\\d+).*", "\\1",   sub_idx$product_id[1])
+#
+#           # relevant bands
+#           rel_bands <- ndwi_df[ndwi_df$sat_num == as.numeric(sat), ]
+#
+#           # list of bands
+#           bands <- paste0("B", c(rel_bands$green_num[1],  rel_bands$nir_num[1]))
+#
+#           # subset index to bands of interest
+#           sub_idx <- sub_idx[sub_idx$band %in% bands, ]
+#           sub_idx$satellite <- sat
+#           sub_idx
+#
+#           # data.frame( url  = gsub( "gs://","https://storage.googleapis.com/", paste0(
+#           #       index_tbl$url[y], "/", paste0(index_tbl$product_id[y], "_B",
+#           #       ifelse(bands < 10, paste0("0", bands), bands),".TIF")) ),
+#           #   date = index_tbl$date[y],satellite = sat,  product_id = index_tbl$product_id[y], band= paste0("B",
+#             #   ifelse(bands < 10, paste0("0", bands), bands)), cloud_cover   = index_tbl$cloud_cover[y])
+#       }) %>%
+#       dplyr::bind_rows() %>%
+#       dplyr::tibble() %>%
+#       dplyr::group_by(satellite) %>%
+#       dplyr::arrange(date, .by_group = T) %>%
+#       dplyr::ungroup() %>%
+#       split(factor(.$product_id, levels = unique(.$product_id)))
+#
+#     message(paste0("Downloading Landsat data..."))
+#
+#     # dates to assign as names to list
+#     stk_dates <- lapply(1:length(url_df), function(z) {
+#       gsub(
+#         "-",
+#         "_",
+#         paste0(
+#           as.character(unique(url_df[[z]]$satellite)), "_", as.character(as.Date(unique(url_df[[z]]$date))),
+#           "_", as.character(unique(url_df[[z]]$product_id))
+#                )
+#         )
+#     }) %>%
+#       unlist()
+#
+#   # loop over list of URLs pointing to Sentinal data in GCP
+#   ls_stk <- lapply(1:length(url_df), function(y) {
+#
+#       prod_id <- unique(url_df[[y]]$product_id)
+#
+#       # download rasters
+#       r_lst <-
+#         lapply(1:nrow(url_df[[y]]), function(i) {
+#
+#           message(paste0(
+#             "Product: ", url_df[[y]]$product_id[i], " (Band ", url_df[[y]]$band[i], ") - ",
+#             y, "/", (length(url_df))))
+#
+#           tryCatch(
+#             terra::rast(url_df[[y]]$url[i]),
+#
+#             error = function(e) NULL
+#             # message(paste0("ERROR\nCould not find product: ", url_df[[y]]$product_id[i], "(", url_df[[y]]$band[i], ")" ))
+#           )
+#         })
+#
+#       # if NULL elemnts in list, return NULL
+#       if(!is.null(unlist(r_lst))) {
+#
+#         message("---> Cropping and masking to AOI")
+#
+#         r_lst <-
+#           r_lst %>%
+#           terra::rast() %>%
+#           terra::crop(terra::project(mask_shp, terra::crs(r_lst[[1]]))) %>%
+#           terra::mask(terra::project(mask_shp, terra::crs(r_lst[[1]])))
+#
+#         r_lst
+#
+#       } else {
+#
+#         r_lst <- NULL
+#
+#         r_lst
+#
+#       }
+#
+#   })
+#
+#   # remove missing dates from name list
+#   stk_dates <- stk_dates[!sapply(ls_stk,is.null)]
+#
+#   # remove NULL list elements
+#   ls_stk <- ls_stk[!sapply(ls_stk,is.null)]
+#
+#   # Set names and make a terra sds
+#   ls_stk <-
+#     ls_stk %>%
+#     stats::setNames(stk_dates) %>%
+#     terra::sds()
+#
+#
+#   return(ls_stk)
+#
+# }
 
 get_landsat <- function(
     bq_project     = NULL,
