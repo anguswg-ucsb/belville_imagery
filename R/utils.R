@@ -1,3 +1,4 @@
+
 get_landsat_index <- function(
     bq_project     = NULL,
     table_id       = NULL,
