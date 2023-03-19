@@ -4,20 +4,13 @@
 library(raster) # Raster Data handling
 library(terra)
 library(tidyverse) # Data Manipulation
-# library(getlandsat) # keyless Landsat data (2013-2017)
 library(sf) # Vector data processing
 library(mapview) # Rapid Interactive visualization
-library(rstac)
-
 library(httr)
 library(jsonlite)
-
 library(bigrquery)
 
 source("R/utils.R")
-# path 26
-# row 39
-
 # ******************
 # ---- Load AOI ----
 # ******************
@@ -70,16 +63,6 @@ save_sds(
   save_directory = paste0("D:/belville_tx/output_",  gsub('[^a-zA-Z0-9/_]+', '_', Sys.Date())),
   filenames      = names(ndwi_stk)
 )
-
-# landsat_stk <-
-#   get_landsat(
-#     bq_project =  "landsat-index-table",
-#     table_id   = "bigquery-public-data.cloud_storage_geo_index.landsat_index",
-#     path       = "26",
-#     row        = "39",
-#     start_date = "2018-10-01",
-#     end_date   = "2019-01-15"
-#   )
 
 # ****************************
 # ---- Sentinal 2 imagery ----

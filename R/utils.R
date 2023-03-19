@@ -1,4 +1,205 @@
+#' Retrieve climate data and process zonal climate timeseries for a spatial polygon object
+#' @param shp a spatial polygon object (sf or sp) with a unique "grid_id" column
+#' @param param a meteorological parameter (see 'param_meta$terraclim')
+#' @param start_date a start date given as "YYYY-MM-DD"
+#' @param end_date an end date given as "YYYY-MM-DD"
+#'
+#' @return dataframe with a timeseries of param values for each polygon in shp
+#' @export
+shp_ts <- function(
+    shp,
+    param,
+    start_date,
+    end_date
+) {
 
+  # check if a unique grid_id column is present in shp
+  if(!any(grepl("grid_id", names(shp)) == TRUE)) {
+    shp <-
+      shp %>%
+      dplyr::mutate(
+        grid_id = 1:dplyr::n()
+      )
+  }
+
+  # pull climate data for area, param, and date range
+  clim <- climateR::getTerraClim(
+    AOI       = shp,
+    param     = param,
+    startDate = start_date,
+    endDate   = end_date
+  )
+
+  doParallel::stopImplicitCluster()
+
+  # select raster stack and execute zonal
+  clim_ts <-
+    clim[[1]] %>%
+    terra::rast() %>%
+    zonal::execute_zonal(
+      data = .,
+      geom = shp,
+      ID   = "grid_id",
+      join = FALSE
+
+    )
+
+  # clean up dates and climate variable
+  clim_ts <-
+    clim_ts %>%
+    dplyr::select(grid_id, contains("mean")) %>%
+    sf::st_drop_geometry() %>%
+    dplyr::tibble() %>%
+    tidyr::pivot_longer(cols = c(-grid_id)) %>%
+    dplyr::mutate(
+      name = paste0(gsub("\\.", "-", gsub("mean.X", "", name)), "-01")
+    ) %>%
+    dplyr::group_by(grid_id) %>%
+    stats::setNames(c("grid_id", "date", param))
+
+  return(clim_ts)
+
+}
+
+#' Retrieve climate data and process zonal climate timeseries for a spatial polygon object
+#' @param shp a spatial polygon object (sf or sp) with a unique "grid_id" column
+#' @param param a meteorological parameter (see 'param_meta$terraclim')
+#' @param start_date a start date given as "YYYY-MM-DD"
+#' @param end_date an end date given as "YYYY-MM-DD"
+#'
+#' @return dataframe with a timeseries of param values for each polygon in shp
+#' @export
+pt_ts <- function(
+    pt,
+    param,
+    start_date,
+    end_date
+) {
+
+  # pull climate data for area, param, and date range
+  clim_ts <- climateR::getGridMET(
+    AOI       = pt,
+    param     = param,
+    startDate = start_date,
+    endDate   = end_date
+  )
+
+  doParallel::stopImplicitCluster()
+
+  return(clim_ts)
+
+}
+
+
+aggreg_gridmet <- function(
+    pt,
+    start_date,
+    end_date,
+    ignore_params = NULL,
+    verbose = TRUE
+) {
+
+  # list of gridMET parameters
+  param_lst <- climateR::param_meta$gridmet$common.name
+  desc_lst  <- climateR::param_meta$gridmet$description
+
+  # specifically ignore certain climate variables
+  if(!is.null(ignore_params)) {
+
+    param_lst <- param_lst[param_lst != ignore_params]
+    desc_lst  <- desc_lst[param_lst != ignore_params]
+
+    }
+  if(verbose == TRUE) {
+
+    message(paste0("Aggregating climate data per point..."))
+
+  }
+
+  # iterate over gridMET params and get all climate data variables for a point
+  climate_ts <- lapply(1:length(param_lst), function(i){
+
+    if(verbose == TRUE) {
+      message(paste0("\nVariable: ", desc_lst[i], " (", param_lst[i], ")",
+                     "\nStart date: ", start_date,
+                     "\nEnd date: ", end_date
+      ))
+    }
+
+    # pull climate dataset
+    clim_ts <- pt_ts(
+      pt         = pt,
+      param      = param_lst[i],
+      start_date = start_date,
+      end_date   = end_date
+    )  %>%
+      dplyr::mutate(dplyr::across(dplyr::everything(), as.character))
+
+    clim_ts
+
+  })
+
+  # reduce list of dataframes to single dataframe
+  climate_ts <-
+    climate_ts %>%
+    purrr::reduce(
+      full_join,
+      by = c("lat", "lon", "source", "date")
+    )
+
+  return(climate_ts)
+
+}
+
+aggreg_climate <- function(
+    shp,
+    start_date,
+    end_date,
+    verbose = TRUE
+) {
+
+  # list of TerraClim parameters
+  param_lst <- climateR::param_meta$terraclim$common.name
+  desc_lst  <- climateR::param_meta$terraclim$description
+
+  if(verbose == TRUE) {
+    message(paste0("Aggregating climate data per polygon..."))
+  }
+
+  # iterate over TerrClim params and get climate data than generate timeseries per polygon
+  climate_ts <- lapply(1:length(param_lst), function(i){
+
+    if(verbose == TRUE) {
+      message(paste0("\nVariable: ", desc_lst[i], " (", param_lst[i], ")",
+                     "\nStart date: ", start_date,
+                     "\nEnd date: ", end_date
+      ))
+    }
+
+    # pull climate dataset
+    clim_ts <- shp_ts(
+      shp        = shp,
+      param      = param_lst[i],
+      start_date = start_date,
+      end_date   = end_date
+    )
+
+    clim_ts
+
+  })
+
+  # reduce list of dataframes to single dataframe
+  climate_ts <-
+    climate_ts %>%
+    purrr::reduce(
+      full_join,
+      by = c("grid_id", "date")
+      # by = c("row", "column", "date")
+    )
+
+  return(climate_ts)
+
+}
 get_landsat_index <- function(
     bq_project     = NULL,
     table_id       = NULL,
@@ -77,6 +278,7 @@ get_landsat_index <- function(
   return(url_df)
 
 }
+
 ndwi_index <- function() {
 
   band_df <- data.frame(
@@ -155,11 +357,6 @@ get_landsat_ndwi <- function(
       sub_idx$satellite <- sat
       sub_idx
 
-      # data.frame( url  = gsub( "gs://","https://storage.googleapis.com/", paste0(
-      #       index_tbl$url[y], "/", paste0(index_tbl$product_id[y], "_B",
-      #       ifelse(bands < 10, paste0("0", bands), bands),".TIF")) ),
-      #   date = index_tbl$date[y],satellite = sat,  product_id = index_tbl$product_id[y], band= paste0("B",
-      #   ifelse(bands < 10, paste0("0", bands), bands)), cloud_cover   = index_tbl$cloud_cover[y])
     }) %>%
     dplyr::bind_rows() %>%
     dplyr::tibble() %>%
@@ -200,7 +397,6 @@ get_landsat_ndwi <- function(
           terra::rast(url_df[[y]]$url[i]),
 
           error = function(e) NULL
-          # message(paste0("ERROR\nCould not find product: ", url_df[[y]]$product_id[i], "(", url_df[[y]]$band[i], ")" ))
         )
       })
 
@@ -572,32 +768,6 @@ get_sentinal <- function(
     mask_shp       = NULL
 ) {
 
-  # bq_project = "landsat-index-table"
-  # table_id   = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
-  # bbox       = bbox
-
-  # mask_shp   =   data.frame(
-  #                 lat = 30.007827243000914,
-  #                 lng = -96.31442973176237
-  #               ) %>%
-  #                 sf::st_as_sf(
-  #                   coords = c("lng", "lat"),
-  #                   crs    = 4326
-  #                 ) %>%
-  #                 sf::st_buffer(1500) %>%
-  #                 sf::st_bbox() %>%
-  #                 sf::st_as_sfc() %>%
-  #                 sf::st_sf() %>%
-  #                 terra::vect()
-
-  # terra::set.crs()
-  # start_date = "2018-10-01"
-  # end_date   = "2019-01-15"
-  # bands = c(3, 8)
-  #
-  # index_tbl <- sentinal_idx
-  # mask_shp <- bbox
-
     # check if mask shape is a SF Object
     if(any(grepl("sf", class(mask_shp)))) {
 
@@ -659,11 +829,6 @@ get_sentinal <- function(
     dplyr::tibble() %>%
     dplyr::group_by(product_id) %>%
     dplyr::group_split()
-    # dplyr::group_by(band, month, year) %>%
-    # dplyr::slice(1) %>%
-    # dplyr::ungroup() %>%
-    # dplyr::group_by(product_id) %>%
-    # dplyr::group_split()
 
   message(paste0("Downloading Sentinal 2 data..."))
 
