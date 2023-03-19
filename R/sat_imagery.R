@@ -11,6 +11,7 @@ library(jsonlite)
 library(bigrquery)
 
 source("R/utils.R")
+
 # ******************
 # ---- Load AOI ----
 # ******************
